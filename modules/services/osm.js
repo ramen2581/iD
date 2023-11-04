@@ -2,26 +2,34 @@ import _throttle from 'lodash-es/throttle';
 
 import { dispatch as d3_dispatch } from 'd3-dispatch';
 import { json as d3_json, xml as d3_xml } from 'd3-fetch';
-
-import osmAuth from 'osm-auth';
+import { osmAuth } from 'osm-auth';
 import RBush from 'rbush';
 
 import { JXON } from '../util/jxon';
 import { geoExtent, geoRawMercator, geoVecAdd, geoZoomToScale } from '../geo';
 import { osmEntity, osmNode, osmNote, osmRelation, osmWay } from '../osm';
-import { utilArrayChunk, utilArrayGroupBy, utilArrayUniq, utilRebind, utilTiler, utilQsString } from '../util';
+import { utilArrayChunk, utilArrayGroupBy, utilArrayUniq, utilObjectOmit, utilRebind, utilTiler, utilQsString } from '../util';
+
+import { osmApiConnections } from '../../config/id.js';
 
 
 var tiler = utilTiler();
 var dispatch = d3_dispatch('apiStatusChange', 'authLoading', 'authDone', 'change', 'loading', 'loaded', 'loadedNotes');
-var urlroot = 'https://www.openstreetmap.org';
+
+var urlroot = osmApiConnections[0].url;
+var apiUrlroot = osmApiConnections[0].apiUrl || urlroot;
+var redirectPath = window.location.origin + window.location.pathname;
 var oauth = osmAuth({
     url: urlroot,
-    oauth_consumer_key: '5A043yRSEugj4DJ5TljuapfnrflWDte8jTOcWLlT',
-    oauth_secret: 'aB3jKq1TRsCOUrfOIZ6oQMEDmv2ptV76PA54NGLL',
+    client_id: osmApiConnections[0].client_id,
+    client_secret: osmApiConnections[0].client_secret,
+    scope: 'read_prefs write_prefs write_api read_gpx write_notes',
+    redirect_uri: redirectPath + 'land.html',
     loading: authLoading,
     done: authDone
 });
+var _apiConnections = osmApiConnections;
+
 // hardcode default block of Google Maps
 var _imageryBlocklists = [/.*\.google(apis)?\..*\/(vt|kh)[\?\/].*([xyz]=.*){3}.*/];
 var _tileCache = { toLoad: {}, loaded: {}, inflight: {}, seen: {}, rtree: new RBush() };
@@ -79,7 +87,7 @@ function abortUnwantedRequests(cache, visibleTiles) {
 function getLoc(attrs) {
     var lon = attrs.lon && attrs.lon.value;
     var lat = attrs.lat && attrs.lat.value;
-    return [parseFloat(lon), parseFloat(lat)];
+    return [Number(lon), Number(lat)];
 }
 
 
@@ -201,7 +209,7 @@ var jsonparsers = {
             timestamp: obj.timestamp,
             user: obj.user,
             uid: obj.uid && obj.uid.toString(),
-            loc: [parseFloat(obj.lon), parseFloat(obj.lat)],
+            loc: [Number(obj.lon), Number(obj.lat)],
             tags: obj.tags
         });
     },
@@ -564,6 +572,11 @@ export default {
     },
 
 
+    getUrlRoot: function() {
+        return urlroot;
+    },
+
+
     changesetURL: function(changesetID) {
         return urlroot + '/changeset/' + changesetID;
     },
@@ -657,7 +670,11 @@ export default {
         }
 
         if (this.authenticated()) {
-            return oauth.xhr({ method: 'GET', path: path }, done);
+            return oauth.xhr({
+                method: 'GET',
+                prefix: false,
+                path: urlroot + path
+            }, done);
         } else {
             var url = urlroot + path;
             var controller = new AbortController();
@@ -784,8 +801,9 @@ export default {
         } else {   // Open a new changeset..
             var options = {
                 method: 'PUT',
-                path: '/api/0.6/changeset/create',
-                options: { header: { 'Content-Type': 'text/xml' } },
+                prefix: false,
+                path: apiUrlroot + '/api/0.6/changeset/create',
+                headers: { 'Content-Type': 'text/xml' },
                 content: JXON.stringify(changeset.asJXON())
             };
             _changeset.inflight = oauth.xhr(
@@ -805,8 +823,9 @@ export default {
             // Upload the changeset..
             var options = {
                 method: 'POST',
-                path: '/api/0.6/changeset/' + changesetID + '/upload',
-                options: { header: { 'Content-Type': 'text/xml' } },
+                prefix: false,
+                path: apiUrlroot + '/api/0.6/changeset/' + changesetID + '/upload',
+                headers: { 'Content-Type': 'text/xml' },
                 content: JXON.stringify(changeset.osmChangeJXON(changes))
             };
             _changeset.inflight = oauth.xhr(
@@ -831,8 +850,9 @@ export default {
                 // Still attempt to close changeset, but ignore response because #2667
                 oauth.xhr({
                     method: 'PUT',
-                    path: '/api/0.6/changeset/' + changeset.id + '/close',
-                    options: { header: { 'Content-Type': 'text/xml' } }
+                    prefix: false,
+                    path: apiUrlroot + '/api/0.6/changeset/' + changeset.id + '/close',
+                    headers: { 'Content-Type': 'text/xml' }
                 }, function() { return true; });
             }
         }
@@ -861,10 +881,11 @@ export default {
         }
 
         utilArrayChunk(toLoad, 150).forEach(function(arr) {
-            oauth.xhr(
-                { method: 'GET', path: '/api/0.6/users.json?users=' + arr.join() },
-                wrapcb(this, done, _connectionID)
-            );
+            oauth.xhr({
+                method: 'GET',
+                prefix: false,
+                path: apiUrlroot + '/api/0.6/users.json?users=' + arr.join()
+            }, wrapcb(this, done, _connectionID));
         }.bind(this));
 
         function done(err, payload) {
@@ -887,10 +908,11 @@ export default {
             return callback(undefined, _userCache.user[uid]);
         }
 
-        oauth.xhr(
-            { method: 'GET', path: '/api/0.6/user/' + uid + '.json' },
-            wrapcb(this, done, _connectionID)
-        );
+        oauth.xhr({
+            method: 'GET',
+            prefix: false,
+            path: apiUrlroot + '/api/0.6/user/' + uid + '.json'
+        }, wrapcb(this, done, _connectionID));
 
         function done(err, payload) {
             if (err) return callback(err);
@@ -911,10 +933,11 @@ export default {
             return callback(undefined, _userDetails);
         }
 
-        oauth.xhr(
-            { method: 'GET', path: '/api/0.6/user/details.json' },
-            wrapcb(this, done, _connectionID)
-        );
+        oauth.xhr({
+            method: 'GET',
+            prefix: false,
+            path: apiUrlroot + '/api/0.6/user/details.json'
+        }, wrapcb(this, done, _connectionID));
 
         function done(err, payload) {
             if (err) return callback(err);
@@ -944,10 +967,11 @@ export default {
         function gotDetails(err, user) {
             if (err) { return callback(err); }
 
-            oauth.xhr(
-                { method: 'GET', path: '/api/0.6/changesets?user=' + user.id },
-                wrapcb(this, done, _connectionID)
-            );
+            oauth.xhr({
+                method: 'GET',
+                prefix: false,
+                path: apiUrlroot + '/api/0.6/changesets?user=' + user.id
+            }, wrapcb(this, done, _connectionID));
         }
 
         function done(err, xml) {
@@ -969,7 +993,7 @@ export default {
     // Fetch the status of the OSM API
     // GET /api/capabilities
     status: function(callback) {
-        var url = urlroot + '/api/capabilities';
+        var url = apiUrlroot + '/api/capabilities';
         var errback = wrapcb(this, done, _connectionID);
         d3_xml(url)
             .then(function(data) { errback(null, data); })
@@ -1183,10 +1207,11 @@ export default {
 
         var path = '/api/0.6/notes?' + utilQsString({ lon: note.loc[0], lat: note.loc[1], text: comment });
 
-        _noteCache.inflightPost[note.id] = oauth.xhr(
-            { method: 'POST', path: path },
-            wrapcb(this, done, _connectionID)
-        );
+        _noteCache.inflightPost[note.id] = oauth.xhr({
+            method: 'POST',
+            prefix: false,
+            path: urlroot + path
+        }, wrapcb(this, done, _connectionID));
 
 
         function done(err, xml) {
@@ -1235,10 +1260,11 @@ export default {
             path += '?' + utilQsString({ text: note.newComment });
         }
 
-        _noteCache.inflightPost[note.id] = oauth.xhr(
-            { method: 'POST', path: path },
-            wrapcb(this, done, _connectionID)
-        );
+        _noteCache.inflightPost[note.id] = oauth.xhr({
+            method: 'POST',
+            prefix: false,
+            path: urlroot + path
+        }, wrapcb(this, done, _connectionID));
 
 
         function done(err, xml) {
@@ -1267,14 +1293,22 @@ export default {
     },
 
 
-    switch: function(options) {
-        urlroot = options.urlroot;
+    /* connection options for source switcher (optional) */
+    apiConnections: function(val) {
+        if (!arguments.length) return _apiConnections;
+        _apiConnections = val;
+        return this;
+    },
 
-        oauth.options(Object.assign({
-            url: urlroot,
-            loading: authLoading,
-            done: authDone
-        }, options));
+
+    switch: function(newOptions) {
+        urlroot = newOptions.url;
+        apiUrlroot = newOptions.apiUrl || urlroot;
+
+        // Copy the existing options, but omit 'access_token'.
+        // (if we did preauth, access_token won't work on a different server)
+        var oldOptions = utilObjectOmit(oauth.options(), 'access_token');
+        oauth.options(Object.assign(oldOptions, newOptions));
 
         this.reset();
         this.userChangesets(function() {});  // eagerly load user details/changesets
@@ -1384,7 +1418,7 @@ export default {
             that.userChangesets(function() {});  // eagerly load user details/changesets
         }
 
-        return oauth.authenticate(done);
+        oauth.authenticate(done);
     },
 
 

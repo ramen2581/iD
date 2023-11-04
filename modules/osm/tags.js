@@ -8,6 +8,33 @@ export function osmIsInterestingTag(key) {
         key.indexOf('tiger:') !== 0;
 }
 
+export const osmLifecyclePrefixes = {
+    // nonexistent, might be built
+    proposed: true, planned: true,
+    // under maintentance or between groundbreaking and opening
+    construction: true,
+    // existent but not functional
+    disused: true,
+    // dilapidated to nonexistent
+    abandoned: true, was: true,
+    // nonexistent, still may appear in imagery
+    dismantled: true, razed: true, demolished: true, destroyed: true, removed: true, obliterated: true,
+    // existent occasionally, e.g. stormwater drainage basin
+    intermittent: true
+};
+
+/** @param {string} key */
+export function osmRemoveLifecyclePrefix(key) {
+    const keySegments = key.split(':');
+    if (keySegments.length === 1) return key;
+
+    if (keySegments[0] in osmLifecyclePrefixes) {
+        return key.slice(keySegments[0].length + 1);
+    }
+
+    return key;
+}
+
 export var osmAreaKeys = {};
 export function osmSetAreaKeys(value) {
     osmAreaKeys = value;
@@ -33,6 +60,9 @@ export var osmAreaKeysExceptions = {
         turntable: true,
         wash: true
     },
+    traffic_calming: {
+        island: true
+    },
     waterway: {
         dam: true
     }
@@ -44,17 +74,23 @@ export function osmTagSuggestingArea(tags) {
     if (tags.area === 'no') return null;
 
     var returnTags = {};
-    for (var key in tags) {
-        if (key in osmAreaKeys && !(tags[key] in osmAreaKeys[key])) {
-            returnTags[key] = tags[key];
+    for (var realKey in tags) {
+        const key = osmRemoveLifecyclePrefix(realKey);
+        if (key in osmAreaKeys && !(tags[realKey] in osmAreaKeys[key])) {
+            returnTags[realKey] = tags[realKey];
             return returnTags;
         }
-        if (key in osmAreaKeysExceptions && tags[key] in osmAreaKeysExceptions[key]) {
-            returnTags[key] = tags[key];
+        if (key in osmAreaKeysExceptions && tags[realKey] in osmAreaKeysExceptions[key]) {
+            returnTags[realKey] = tags[realKey];
             return returnTags;
         }
     }
     return null;
+}
+
+export var osmLineTags = {};
+export function osmSetLineTags(value) {
+    osmLineTags = value;
 }
 
 // Tags that indicate a node can be a standalone point
@@ -116,6 +152,8 @@ export var osmOneWayTags = {
         'yes': true
     },
     'seamark:type': {
+        'two-way_route': true,
+        'recommended_traffic_lane': true,
         'separation_lane': true,
         'separation_roundabout': true
     },
@@ -124,7 +162,9 @@ export var osmOneWayTags = {
         'ditch': true,
         'drain': true,
         'fish_pass': true,
+        'pressurised': true,
         'river': true,
+        'spillway': true,
         'stream': true,
         'tidal_channel': true
     }
@@ -136,6 +176,7 @@ export var osmPavedTags = {
         'paved': true,
         'asphalt': true,
         'concrete': true,
+        'chipseal': true,
         'concrete:lanes': true,
         'concrete:plates': true
     },
@@ -160,7 +201,7 @@ export var osmSemipavedTags = {
 export var osmRightSideIsInsideTags = {
     'natural': {
         'cliff': true,
-        'coastline': 'coastline',
+        'coastline': 'coastline'
     },
     'barrier': {
         'retaining_wall': true,
@@ -169,7 +210,8 @@ export var osmRightSideIsInsideTags = {
         'city_wall': true,
     },
     'man_made': {
-        'embankment': true
+        'embankment': true,
+        'quay': true
     },
     'waterway': {
         'weir': true
@@ -200,3 +242,6 @@ export var osmRailwayTrackTagValues = {
 export var osmFlowingWaterwayTagValues = {
     canal: true, ditch: true, drain: true, fish_pass: true, river: true, stream: true, tidal_channel: true
 };
+
+// Tags which values should be considered case sensitive when offering tag suggestions
+export const allowUpperCaseTagValues = /network|taxon|genus|species|brand|grape_variety|royal_cypher|listed_status|booth|rating|stars|:output|_hours|_times|_ref|manufacturer|country|target|brewery|cai_scale|traffic_sign/;
